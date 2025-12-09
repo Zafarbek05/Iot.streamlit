@@ -6,12 +6,9 @@ from streamlit_option_menu import option_menu
 from datetime import datetime
 import json
 import time
-# --- NEW REQUIRED IMPORT ---
-import base64
 
 # Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
-
 
 # Initialization Function
 def init_firebase():
@@ -20,32 +17,23 @@ def init_firebase():
         get_app()
     except ValueError:
         try:
+            # 1. Check if the JSON string is in st.secrets
             if "firebase_credentials" in st.secrets:
-                # 1. Get the encoded Base64 string from secrets
-                encoded_string = st.secrets["firebase_credentials"]
-
-                # 2. Decode the Base64 string back to bytes
-                decoded_bytes = base64.b64decode(encoded_string)
-
-                # 3. Decode the bytes back to a JSON string
-                json_string = decoded_bytes.decode('utf-8')
-
-                # 4. Load the final JSON dictionary
-                key_dict = json.loads(json_string)
-
+                # Load the JSON string from Streamlit secrets and parse it into a Python dictionary
+                # This requires the secret to be pasted as a valid single-line JSON string.
+                key_dict = json.loads(st.secrets["firebase_credentials"])
                 cred = credentials.Certificate(key_dict)
             else:
-                st.error(
-                    "Firebase credentials not found in Streamlit secrets. Please configure the 'firebase_credentials' secret.")
+                st.error("Firebase credentials not found in Streamlit secrets. Please configure the 'firebase_credentials' secret.")
                 st.stop()
 
             initialize_app(cred, {'databaseURL': FIREBASE_URL})
             st.success("Firebase connected successfully!")
         except Exception as e:
+            # Catches errors during json.loads or credentials.Certificate initialization
             st.error(f"Failed to initialize Firebase: {e}")
             st.stop()
     return db.reference('/')
-
 
 # Streamlit Page Setup
 st.set_page_config(layout="wide", page_title="Smart Climate Monitor", page_icon="🏠")
