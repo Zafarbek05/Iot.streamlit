@@ -6,9 +6,12 @@ from streamlit_option_menu import option_menu
 from datetime import datetime
 import json
 import time
+# --- NEW REQUIRED IMPORT ---
+import base64
 
 # Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
+
 
 # Initialization Function
 def init_firebase():
@@ -17,14 +20,23 @@ def init_firebase():
         get_app()
     except ValueError:
         try:
-            # 1. Check if credentials are in st.secrets
             if "firebase_credentials" in st.secrets:
-                # Load the clean JSON string from Streamlit secrets
-                key_dict = json.loads(st.secrets["firebase_credentials"])
+                # 1. Get the encoded Base64 string from secrets
+                encoded_string = st.secrets["firebase_credentials"]
+
+                # 2. Decode the Base64 string back to bytes
+                decoded_bytes = base64.b64decode(encoded_string)
+
+                # 3. Decode the bytes back to a JSON string
+                json_string = decoded_bytes.decode('utf-8')
+
+                # 4. Load the final JSON dictionary
+                key_dict = json.loads(json_string)
+
                 cred = credentials.Certificate(key_dict)
             else:
-                # Stop if secret is not found (necessary for deployment)
-                st.error("Firebase credentials not found in Streamlit secrets. Please configure the 'firebase_credentials' secret.")
+                st.error(
+                    "Firebase credentials not found in Streamlit secrets. Please configure the 'firebase_credentials' secret.")
                 st.stop()
 
             initialize_app(cred, {'databaseURL': FIREBASE_URL})
@@ -33,6 +45,7 @@ def init_firebase():
             st.error(f"Failed to initialize Firebase: {e}")
             st.stop()
     return db.reference('/')
+
 
 # Streamlit Page Setup
 st.set_page_config(layout="wide", page_title="Smart Climate Monitor", page_icon="🏠")
