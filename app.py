@@ -7,36 +7,56 @@ from datetime import datetime
 import json
 import time
 
+# In app.py
+
+# ... (Standard imports like streamlit, pandas, etc.)
+from firebase_admin import credentials, db, initialize_app, get_app
+
+# REMOVE: import json  <--- You no longer need the json library for loading secrets
+
 # Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
 
-# Initialization Function
+
+# Initialization Function - UPDATED TO READ INDIVIDUAL SECRETS
 def init_firebase():
-    """Initializes Firebase Admin SDK if it hasn't been initialized already."""
+    """Initializes Firebase Admin SDK by reading individual secrets."""
     try:
         get_app()
     except ValueError:
         try:
-            # 1. Check if the JSON string is in st.secrets
-            if "firebase_credentials" in st.secrets:
-                # Load the JSON string from Streamlit secrets and parse it into a Python dictionary
-                # This requires the secret to be pasted as a valid single-line JSON string.
-                key_dict = json.loads(st.secrets["firebase_credentials"])
+            # Check for required core credentials
+            if all(key in st.secrets for key in
+                   ["firebase_type", "firebase_project_id", "firebase_private_key", "firebase_client_email"]):
+
+                # Construct the dictionary directly using the individual secrets
+                # The Firebase SDK's credentials.Certificate() handles the reconstruction
+                # of the PEM file from the 'private_key' string correctly.
+                key_dict = {
+                    "type": st.secrets["firebase_type"],
+                    "project_id": st.secrets["firebase_project_id"],
+                    "private_key": st.secrets["firebase_private_key"],
+                    "client_email": st.secrets["firebase_client_email"]
+                    # Other fields (ID, URI's) are often optional for basic setup
+                }
+
                 cred = credentials.Certificate(key_dict)
             else:
-                st.error("Firebase credentials not found in Streamlit secrets. Please configure the 'firebase_credentials' secret.")
+                st.error(
+                    "Missing one or more required Firebase secrets (firebase_type, firebase_project_id, firebase_private_key, firebase_client_email). Please check the Streamlit Secrets dashboard.")
                 st.stop()
 
             initialize_app(cred, {'databaseURL': FIREBASE_URL})
             st.success("Firebase connected successfully!")
         except Exception as e:
-            # Catches errors during json.loads or credentials.Certificate initialization
+            # If initialization still fails, the private key itself is still likely corrupted.
             st.error(f"Failed to initialize Firebase: {e}")
             st.stop()
+
     return db.reference('/')
 
-# Streamlit Page Setup
-st.set_page_config(layout="wide", page_title="Smart Climate Monitor", page_icon="🏠")
+
+# ... (The rest of your app.py code) ...
 
 # Initialize Firebase and get the root reference
 root_ref = init_firebase()
