@@ -9,54 +9,59 @@ import time
 
 # In app.py
 
-# ... (Standard imports like streamlit, pandas, etc.)
+# ... (Standard imports)
 from firebase_admin import credentials, db, initialize_app, get_app
 
-# REMOVE: import json  <--- You no longer need the json library for loading secrets
+# REMOVE: import json
 
 # Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
 
 
-# Initialization Function - UPDATED TO READ INDIVIDUAL SECRETS
+# Initialization Function - UPDATED TO INCLUDE ALL REQUIRED FIELDS
 def init_firebase():
     """Initializes Firebase Admin SDK by reading individual secrets."""
     try:
         get_app()
     except ValueError:
         try:
-            # Check for required core credentials
-            if all(key in st.secrets for key in
-                   ["firebase_type", "firebase_project_id", "firebase_private_key", "firebase_client_email"]):
+            # Define ALL required fields for the Certificate object
+            required_keys = [
+                "firebase_type", "firebase_project_id", "firebase_private_key",
+                "firebase_client_email", "firebase_token_uri", "firebase_auth_uri",
+                "firebase_auth_provider_x509_cert_url", "firebase_client_x509_cert_url",
+                "firebase_client_id"  # Although sometimes optional, best to include
+            ]
+
+            if all(key in st.secrets for key in required_keys):
 
                 # Construct the dictionary directly using the individual secrets
-                # The Firebase SDK's credentials.Certificate() handles the reconstruction
-                # of the PEM file from the 'private_key' string correctly.
                 key_dict = {
                     "type": st.secrets["firebase_type"],
                     "project_id": st.secrets["firebase_project_id"],
                     "private_key": st.secrets["firebase_private_key"],
-                    "client_email": st.secrets["firebase_client_email"]
-                    # Other fields (ID, URI's) are often optional for basic setup
+                    "client_email": st.secrets["firebase_client_email"],
+
+                    # ADDED NECESSARY URI FIELDS
+                    "token_uri": st.secrets["firebase_token_uri"],
+                    "auth_uri": st.secrets["firebase_auth_uri"],
+                    "auth_provider_x509_cert_url": st.secrets["firebase_auth_provider_x509_cert_url"],
+                    "client_x509_cert_url": st.secrets["firebase_client_x509_cert_url"],
+                    "client_id": st.secrets["firebase_client_id"]
                 }
 
                 cred = credentials.Certificate(key_dict)
             else:
-                st.error(
-                    "Missing one or more required Firebase secrets (firebase_type, firebase_project_id, firebase_private_key, firebase_client_email). Please check the Streamlit Secrets dashboard.")
+                st.error("Missing one or more required Firebase secrets. Please check the Streamlit Secrets dashboard.")
                 st.stop()
 
             initialize_app(cred, {'databaseURL': FIREBASE_URL})
             st.success("Firebase connected successfully!")
         except Exception as e:
-            # If initialization still fails, the private key itself is still likely corrupted.
             st.error(f"Failed to initialize Firebase: {e}")
             st.stop()
 
     return db.reference('/')
-
-
-# ... (The rest of your app.py code) ...
 
 # Initialize Firebase and get the root reference
 root_ref = init_firebase()
