@@ -100,9 +100,12 @@ def get_data_history():
 
         df = pd.DataFrame(data_list)
 
-        # Conversion to datetime
+        # time conversion
         if not df.empty:
-            df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='ms')
+            df['Timestamp (ms)'] = df['Timestamp (ms)'] * 1000
+
+            df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='us')
+
             df.set_index('Timestamp', inplace=True)
             df = df.sort_index()
 
