@@ -4,8 +4,6 @@ import plotly.express as px
 from firebase_admin import credentials, db, initialize_app, get_app
 from streamlit_option_menu import option_menu
 
-# import time is no longer needed since real-time loops are removed
-
 # Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
 
@@ -57,7 +55,7 @@ def init_firebase():
 root_ref = init_firebase()
 
 
-# --- GET DATA HISTORY FUNCTION (FIXED FOR EFFICIENT LATEST DATA RETRIEVAL) ---
+# --- GET DATA HISTORY FUNCTION ---
 @st.cache_data(ttl=60)
 def get_data_history(limit=15):
     """
@@ -65,10 +63,7 @@ def get_data_history(limit=15):
     (limit_to_last), which ensures only the newest data is fetched.
     """
     try:
-        # Use a Query to get only the last 'limit' records (assuming push IDs are used as keys)
         logs_ref = root_ref.child('data_logs')
-
-        # Use limit_to_last() for efficient retrieval of the newest entries
         logs = logs_ref.order_by_key().limit_to_last(limit).get()
 
         if not logs:
@@ -99,10 +94,8 @@ def get_data_history(limit=15):
         df = pd.DataFrame(data_list)
 
         if not df.empty:
-            # FIX: Change unit from 'ms' to 's'
-            # The "1970-01-21" date happens when you treat current Unix Seconds as Milliseconds.
+            # Conversion to datetime using 's' (Seconds) to fix 1970 date issue
             df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='s')
-
             df.set_index('Timestamp', inplace=True)
             df = df.sort_index()
 
@@ -128,7 +121,6 @@ if selected == "Data History":
     st.title("📊 Data History & Visualization (Latest 15)")
     st.markdown("---")
 
-    # Fetch data only once per page load/manual refresh (limited to 15 entries)
     df_history = get_data_history(limit=15)
 
     if df_history.empty:
@@ -136,7 +128,6 @@ if selected == "Data History":
     else:
         static_key_suffix = "static_display"
 
-        # Update Charts (Charts limited to the fetched 15 entries)
         st.subheader("Time Series Data")
         col1, col2 = st.columns(2)
 
@@ -158,9 +149,7 @@ if selected == "Data History":
             )
             st.plotly_chart(fig_light, use_container_width=True, key=f'light_level_chart_{static_key_suffix}')
 
-        # Update Table (Table shows the latest 15, sorted by latest first)
         st.subheader("Raw Data Table")
-        # Reverse the index to display the newest entry at the top of the table
         latest_15_df_display = df_history.sort_index(ascending=False)
         st.dataframe(latest_15_df_display, use_container_width=True, key=f'data_table_{static_key_suffix}')
 
@@ -172,7 +161,9 @@ elif selected == "Control":
     control_ref = root_ref.child('controls')
 
 
-    @st.cache_data(ttl=60)
+    # Reads current status (Temp/Hum).
+    # Reduced TTL to 5s so you see environmental changes quickly.
+    @st.cache_data(ttl=5)
     def read_current_status():
         """Reads the current status from Firebase."""
         status = root_ref.child('current_status').get()
@@ -181,7 +172,7 @@ elif selected == "Control":
         return 'N/A', 'N/A'
 
 
-    # Control Logic Functions
+    # Sets the override value in Firebase
     def set_override(device, value):
         """Pushes the boolean override command to Firebase."""
         try:
@@ -191,7 +182,9 @@ elif selected == "Control":
             st.error(f"Failed to send command: {e}")
 
 
-    @st.cache_data(ttl=60)
+    # CRITICAL FIX: REMOVED @st.cache_data
+    # This must fetch the LIVE state every time to prevent the toggle from
+    # resetting to an old cached value.
     def get_current_control_state(device):
         """Reads the current override state for the toggle switch."""
         try:
@@ -201,7 +194,7 @@ elif selected == "Control":
             return False
 
 
-    # Live Status Display (Fetched once per refresh)
+    # Live Status Display
     st.subheader("Current Climate Status")
     temp, humidity = read_current_status()
 
@@ -213,6 +206,7 @@ elif selected == "Control":
 
     # Control Widgets
     st.subheader("Light Control")
+    # Fetch live state immediately before rendering the toggle
     current_light_state = get_current_control_state('light')
 
     light_toggle = st.toggle(
@@ -222,8 +216,13 @@ elif selected == "Control":
         help="Turn ON to set LED to 255. Turn OFF to set LED to 0."
     )
 
+    # Check if the user just flipped the switch
     if light_toggle != current_light_state:
         set_override('light', light_toggle)
+        # We manually sleep briefly to allow Firebase to process, then rerun to confirm state
+        import time
+
+        time.sleep(0.5)
         st.rerun()
 
     st.markdown("---")
@@ -240,4 +239,7 @@ elif selected == "Control":
 
     if relay_toggle != current_relay_state:
         set_override('relay', relay_toggle)
+        import time
+
+        time.sleep(0.5)
         st.rerun()
