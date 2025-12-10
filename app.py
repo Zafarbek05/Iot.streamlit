@@ -3,16 +3,12 @@ import pandas as pd
 import plotly.express as px
 from firebase_admin import credentials, db, initialize_app, get_app
 from streamlit_option_menu import option_menu
-from datetime import datetime
-import json
 import time
 
 # In app.py
 
 # ... (Standard imports)
 from firebase_admin import credentials, db, initialize_app, get_app
-
-# REMOVE: import json
 
 # Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
@@ -104,7 +100,7 @@ def get_data_history():
         if not df.empty:
             df['Timestamp (ms)'] = df['Timestamp (ms)'] * 1000
 
-            df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='us')
+            df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='ms')
 
             df.set_index('Timestamp', inplace=True)
             df = df.sort_index()
