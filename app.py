@@ -5,40 +5,39 @@ from firebase_admin import credentials, db, initialize_app, get_app
 from streamlit_option_menu import option_menu
 import time
 
-# In app.py
-
-# ... (Standard imports)
-from firebase_admin import credentials, db, initialize_app, get_app
-
 # Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
 
+# Streamlit Page Setup
+st.set_page_config(layout="wide", page_title="Smart Climate Monitor", page_icon="🏠")
 
-# Initialization Function - UPDATED TO INCLUDE ALL REQUIRED FIELDS
+
+# --- INITIALIZATION FUNCTION (FIXED FOR SPLIT SECRETS) ---
 def init_firebase():
-    """Initializes Firebase Admin SDK by reading individual secrets."""
+    """Initializes Firebase Admin SDK by reading individual secrets from st.secrets."""
+
+    # Check if the app is already initialized
     try:
         get_app()
     except ValueError:
         try:
-            # Define ALL required fields for the Certificate object
+            # Define ALL required fields for the Certificate object (based on previous error)
             required_keys = [
                 "firebase_type", "firebase_project_id", "firebase_private_key",
                 "firebase_client_email", "firebase_token_uri", "firebase_auth_uri",
                 "firebase_auth_provider_x509_cert_url", "firebase_client_x509_cert_url",
-                "firebase_client_id"  # Although sometimes optional, best to include
+                "firebase_client_id"
             ]
 
+            # 1. Check if all individual keys are present
             if all(key in st.secrets for key in required_keys):
 
-                # Construct the dictionary directly using the individual secrets
+                # 2. Construct the full dictionary directly from the simple string secrets
                 key_dict = {
                     "type": st.secrets["firebase_type"],
                     "project_id": st.secrets["firebase_project_id"],
                     "private_key": st.secrets["firebase_private_key"],
                     "client_email": st.secrets["firebase_client_email"],
-
-                    # ADDED NECESSARY URI FIELDS
                     "token_uri": st.secrets["firebase_token_uri"],
                     "auth_uri": st.secrets["firebase_auth_uri"],
                     "auth_provider_x509_cert_url": st.secrets["firebase_auth_provider_x509_cert_url"],
@@ -59,9 +58,12 @@ def init_firebase():
 
     return db.reference('/')
 
+
 # Initialize Firebase and get the root reference
 root_ref = init_firebase()
 
+
+# --- GET DATA HISTORY FUNCTION (FIXED FOR TIME CONVERSION) ---
 @st.cache_data(ttl=5)
 def get_data_history():
     """Reads and formats data from the /data_logs path."""
@@ -96,10 +98,10 @@ def get_data_history():
 
         df = pd.DataFrame(data_list)
 
-        # time conversion
+        # Time Conversion: Assuming Firebase stores standard milliseconds (13-digit Unix time).
         if not df.empty:
-            df['Timestamp (ms)'] = df['Timestamp (ms)'] * 1000
-
+            # CRITICAL FIX: The multiplication by 1000 was removed.
+            # We assume the incoming number is in milliseconds, and use 'unit='ms'
             df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='ms')
 
             df.set_index('Timestamp', inplace=True)
@@ -110,6 +112,7 @@ def get_data_history():
     except Exception as e:
         st.error(f"Error reading data from Firebase: {e}")
         return pd.DataFrame()
+
 
 # Multi-Page Navigation
 with st.sidebar:
