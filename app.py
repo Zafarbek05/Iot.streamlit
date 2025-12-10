@@ -3,9 +3,7 @@ import pandas as pd
 import plotly.express as px
 from firebase_admin import credentials, db, initialize_app, get_app
 from streamlit_option_menu import option_menu
-import time
 
-# Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
 
 # Streamlit Page Setup
@@ -13,15 +11,14 @@ st.set_page_config(layout="wide", page_title="Smart Climate Monitor", page_icon=
 
 
 # --- INITIALIZATION FUNCTION (FIXED FOR SPLIT SECRETS) ---
+# NOTE: This function remains unchanged as the secret configuration is now stable.
 def init_firebase():
     """Initializes Firebase Admin SDK by reading individual secrets from st.secrets."""
 
-    # Check if the app is already initialized
     try:
         get_app()
     except ValueError:
         try:
-            # Define ALL required fields for the Certificate object (based on previous error)
             required_keys = [
                 "firebase_type", "firebase_project_id", "firebase_private_key",
                 "firebase_client_email", "firebase_token_uri", "firebase_auth_uri",
@@ -29,10 +26,8 @@ def init_firebase():
                 "firebase_client_id"
             ]
 
-            # 1. Check if all individual keys are present
             if all(key in st.secrets for key in required_keys):
 
-                # 2. Construct the full dictionary directly from the simple string secrets
                 key_dict = {
                     "type": st.secrets["firebase_type"],
                     "project_id": st.secrets["firebase_project_id"],
@@ -63,10 +58,15 @@ def init_firebase():
 root_ref = init_firebase()
 
 
-# --- GET DATA HISTORY FUNCTION (FIXED FOR TIME CONVERSION) ---
-@st.cache_data(ttl=5)
-def get_data_history():
-    """Reads and formats data from the /data_logs path."""
+# --- GET DATA HISTORY FUNCTION (MODIFIED TO LIMIT TO LATEST 15) ---
+@st.cache_data(ttl=60)  # Increased TTL to 60s since manual refresh is required
+def get_data_history(limit=15):
+    """
+    Reads and formats the latest 'limit' data entries from the /data_logs path.
+    NOTE: Firebase SDK retrieves ALL data, but we filter down to the latest N records here.
+    For very large datasets, a native query like .limitToLast() should be used, but
+    we proceed with local filtering for code simplicity here.
+    """
     try:
         logs = root_ref.child('data_logs').get()
 
@@ -78,7 +78,6 @@ def get_data_history():
             if log and 'sensor_logs' in log and 'actuator_logs' in log:
                 timestamp_ms = log.get('timestamp', 0)
 
-                # Ensure timestamp is treated as a long integer
                 if isinstance(timestamp_ms, str):
                     try:
                         timestamp_ms = int(timestamp_ms)
@@ -98,14 +97,14 @@ def get_data_history():
 
         df = pd.DataFrame(data_list)
 
-        # Time Conversion: Assuming Firebase stores standard milliseconds (13-digit Unix time).
         if not df.empty:
-            # CRITICAL FIX: The multiplication by 1000 was removed.
-            # We assume the incoming number is in milliseconds, and use 'unit='ms'
+            # Conversion to datetime (Assuming milliseconds)
             df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='ms')
-
             df.set_index('Timestamp', inplace=True)
             df = df.sort_index()
+
+            # 1. LIMIT DATA TO LATEST N RECORDS
+            df = df.tail(limit)
 
         return df
 
@@ -124,58 +123,50 @@ with st.sidebar:
         default_index=0,
     )
 
-# 1. Data History Page
+# 1. Data History Page (REAL-TIME LOOP REMOVED)
 if selected == "Data History":
     st.title("📊 Data History & Visualization")
     st.markdown("---")
 
-    charts_placeholder = st.empty()
-    table_placeholder = st.empty()
+    # Fetch data only once per page load/manual refresh
+    df_history = get_data_history(limit=15)
 
-    # Real-Time Update Loop for Data History
-    while True:
-        df_history = get_data_history()
+    if df_history.empty:
+        st.info("No data available in the 'data_logs' path. Ensure your NodeMCU is pushing data.")
+    else:
+        # GENERATE A STATIC KEY based on the current time (since we are not looping)
+        # Using a fixed key for static elements is fine now.
+        static_key_suffix = "static_display"
 
-        if df_history.empty:
-            st.info("No data available in the 'data_logs' path. Ensure your NodeMCU is pushing data.")
-            time.sleep(5)
-            continue
+        # Update Charts (2. CHARTS LIMITED BY TABLE DATA)
+        st.subheader("Time Series Data (Latest 15 Entries)")
+        col1, col2 = st.columns(2)
 
-        # GENERATE A DYNAMIC KEY based on the current time
-        dynamic_key_suffix = str(time.time())
+        with col1:
+            fig_th = px.line(
+                df_history,  # df_history now contains only the latest 15
+                y=['Temperature (°C)', 'Humidity (%)'],
+                title="Temperature & Humidity Over Time",
+                height=400
+            )
+            st.plotly_chart(fig_th, use_container_width=True, key=f'temp_hum_chart_{static_key_suffix}')
 
-        # Update Charts
-        with charts_placeholder.container():
-            st.subheader("Time Series Data")
-            col1, col2 = st.columns(2)
+        with col2:
+            fig_light = px.line(
+                df_history,  # df_history now contains only the latest 15
+                y='Light Level (Lux)',
+                title="Light Level Over Time",
+                height=400
+            )
+            st.plotly_chart(fig_light, use_container_width=True, key=f'light_level_chart_{static_key_suffix}')
 
-            with col1:
-                fig_th = px.line(
-                    df_history,
-                    y=['Temperature (°C)', 'Humidity (%)'],
-                    title="Temperature & Humidity Over Time",
-                    height=400
-                )
-                st.plotly_chart(fig_th, use_container_width=True, key=f'temp_hum_chart_{dynamic_key_suffix}')
+        # Update Table (1. DISPLAY LATEST 15)
+        st.subheader("Raw Data Table (Latest 15)")
+        # df_history is already sorted and limited to 15, we just reverse the display order
+        latest_15_df = df_history.sort_index(ascending=False)
+        st.dataframe(latest_15_df, use_container_width=True, key=f'data_table_{static_key_suffix}')
 
-            with col2:
-                fig_light = px.line(
-                    df_history,
-                    y='Light Level (Lux)',
-                    title="Light Level Over Time",
-                    height=400
-                )
-                st.plotly_chart(fig_light, use_container_width=True, key=f'light_level_chart_{dynamic_key_suffix}')
-
-        # 2. Update Table
-        with table_placeholder.container():
-            st.subheader("Raw Data Table (Latest 10)")
-            latest_10_df = df_history.tail(10).sort_index(ascending=False)
-            st.dataframe(latest_10_df, use_container_width=True, key=f'data_table_{dynamic_key_suffix}')
-
-        time.sleep(5)
-
-# 2. Control Page
+# 2. Control Page (REAL-TIME LOOP REMOVED)
 elif selected == "Control":
     st.title("🕹️ Device Control Interface")
     st.markdown("---")
@@ -184,6 +175,7 @@ elif selected == "Control":
 
 
     # Read the current status for display
+    @st.cache_data(ttl=60)
     def read_current_status():
         """Reads the current status from Firebase."""
         status = root_ref.child('current_status').get()
@@ -192,21 +184,18 @@ elif selected == "Control":
         return 'N/A', 'N/A'
 
 
-    # Live Status Display
-    st.subheader("Current Climate Status")
-    status_placeholder = st.empty()
-
-
     # Control Logic Functions
     def set_override(device, value):
         """Pushes the boolean override command to Firebase."""
         try:
+            # We don't use st.cache_data for writes
             control_ref.child(f'{device}_override').set(value)
             st.toast(f"{device.capitalize()} override set to {value}", icon='✅')
         except Exception as e:
             st.error(f"Failed to send command: {e}")
 
 
+    @st.cache_data(ttl=60)
     def get_current_control_state(device):
         """Reads the current override state for the toggle switch."""
         try:
@@ -215,6 +204,16 @@ elif selected == "Control":
         except:
             return False
 
+
+    # Live Status Display (Fetched once per refresh)
+    st.subheader("Current Climate Status")
+    temp, humidity = read_current_status()
+
+    col_status_1, col_status_2 = st.columns(2)
+    with col_status_1:
+        st.metric("Current Temperature", f"{temp}°C")
+    with col_status_2:
+        st.metric("Current Humidity", f"{humidity}%")
 
     # Control Widgets
     st.subheader("Light Control")
@@ -246,16 +245,3 @@ elif selected == "Control":
     if relay_toggle != current_relay_state:
         set_override('relay', relay_toggle)
         st.rerun()
-
-    # Real-Time Update Loop
-    while True:
-        temp, humidity = read_current_status()
-
-        with status_placeholder.container():
-            col_status_1, col_status_2 = st.columns(2)
-            with col_status_1:
-                st.metric("Current Temperature", f"{temp}°C")
-            with col_status_2:
-                st.metric("Current Humidity", f"{humidity}%")
-
-        time.sleep(5)
