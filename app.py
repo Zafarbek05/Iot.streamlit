@@ -99,11 +99,11 @@ def get_data_history(limit=15):
         df = pd.DataFrame(data_list)
 
         if not df.empty:
-            # Conversion to datetime (Assuming milliseconds)
-            df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='ms')
-            df.set_index('Timestamp', inplace=True)
+            # FIX: Change unit from 'ms' to 's'
+            # The "1970-01-21" date happens when you treat current Unix Seconds as Milliseconds.
+            df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='s')
 
-            # The data retrieved is already the latest N records. We ensure it's sorted by time.
+            df.set_index('Timestamp', inplace=True)
             df = df.sort_index()
 
         return df
