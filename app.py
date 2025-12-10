@@ -4,17 +4,18 @@ import plotly.express as px
 from firebase_admin import credentials, db, initialize_app, get_app
 from streamlit_option_menu import option_menu
 
+# import time is no longer needed since real-time loops are removed
+
+# Firebase Configuration
 FIREBASE_URL = 'https://smart-climate-monitoring-db-default-rtdb.firebaseio.com/'
 
 # Streamlit Page Setup
 st.set_page_config(layout="wide", page_title="Smart Climate Monitor", page_icon="🏠")
 
 
-# --- INITIALIZATION FUNCTION (FIXED FOR SPLIT SECRETS) ---
-# NOTE: This function remains unchanged as the secret configuration is now stable.
+# --- INITIALIZATION FUNCTION ---
 def init_firebase():
     """Initializes Firebase Admin SDK by reading individual secrets from st.secrets."""
-
     try:
         get_app()
     except ValueError:
@@ -27,7 +28,6 @@ def init_firebase():
             ]
 
             if all(key in st.secrets for key in required_keys):
-
                 key_dict = {
                     "type": st.secrets["firebase_type"],
                     "project_id": st.secrets["firebase_project_id"],
@@ -39,7 +39,6 @@ def init_firebase():
                     "client_x509_cert_url": st.secrets["firebase_client_x509_cert_url"],
                     "client_id": st.secrets["firebase_client_id"]
                 }
-
                 cred = credentials.Certificate(key_dict)
             else:
                 st.error("Missing one or more required Firebase secrets. Please check the Streamlit Secrets dashboard.")
@@ -58,17 +57,19 @@ def init_firebase():
 root_ref = init_firebase()
 
 
-# --- GET DATA HISTORY FUNCTION (MODIFIED TO LIMIT TO LATEST 15) ---
-@st.cache_data(ttl=60)  # Increased TTL to 60s since manual refresh is required
+# --- GET DATA HISTORY FUNCTION (FIXED FOR EFFICIENT LATEST DATA RETRIEVAL) ---
+@st.cache_data(ttl=60)
 def get_data_history(limit=15):
     """
-    Reads and formats the latest 'limit' data entries from the /data_logs path.
-    NOTE: Firebase SDK retrieves ALL data, but we filter down to the latest N records here.
-    For very large datasets, a native query like .limitToLast() should be used, but
-    we proceed with local filtering for code simplicity here.
+    Retrieves the latest 'limit' data entries using a direct Firebase query
+    (limit_to_last), which ensures only the newest data is fetched.
     """
     try:
-        logs = root_ref.child('data_logs').get()
+        # Use a Query to get only the last 'limit' records (assuming push IDs are used as keys)
+        logs_ref = root_ref.child('data_logs')
+
+        # Use limit_to_last() for efficient retrieval of the newest entries
+        logs = logs_ref.order_by_key().limit_to_last(limit).get()
 
         if not logs:
             return pd.DataFrame()
@@ -101,10 +102,9 @@ def get_data_history(limit=15):
             # Conversion to datetime (Assuming milliseconds)
             df['Timestamp'] = pd.to_datetime(df['Timestamp (ms)'], unit='ms')
             df.set_index('Timestamp', inplace=True)
-            df = df.sort_index()
 
-            # 1. LIMIT DATA TO LATEST N RECORDS
-            df = df.tail(limit)
+            # The data retrieved is already the latest N records. We ensure it's sorted by time.
+            df = df.sort_index()
 
         return df
 
@@ -123,28 +123,26 @@ with st.sidebar:
         default_index=0,
     )
 
-# 1. Data History Page (REAL-TIME LOOP REMOVED)
+# 1. Data History Page
 if selected == "Data History":
-    st.title("📊 Data History & Visualization")
+    st.title("📊 Data History & Visualization (Latest 15)")
     st.markdown("---")
 
-    # Fetch data only once per page load/manual refresh
+    # Fetch data only once per page load/manual refresh (limited to 15 entries)
     df_history = get_data_history(limit=15)
 
     if df_history.empty:
         st.info("No data available in the 'data_logs' path. Ensure your NodeMCU is pushing data.")
     else:
-        # GENERATE A STATIC KEY based on the current time (since we are not looping)
-        # Using a fixed key for static elements is fine now.
         static_key_suffix = "static_display"
 
-        # Update Charts (2. CHARTS LIMITED BY TABLE DATA)
-        st.subheader("Time Series Data (Latest 15 Entries)")
+        # Update Charts (Charts limited to the fetched 15 entries)
+        st.subheader("Time Series Data")
         col1, col2 = st.columns(2)
 
         with col1:
             fig_th = px.line(
-                df_history,  # df_history now contains only the latest 15
+                df_history,
                 y=['Temperature (°C)', 'Humidity (%)'],
                 title="Temperature & Humidity Over Time",
                 height=400
@@ -153,20 +151,20 @@ if selected == "Data History":
 
         with col2:
             fig_light = px.line(
-                df_history,  # df_history now contains only the latest 15
+                df_history,
                 y='Light Level (Lux)',
                 title="Light Level Over Time",
                 height=400
             )
             st.plotly_chart(fig_light, use_container_width=True, key=f'light_level_chart_{static_key_suffix}')
 
-        # Update Table (1. DISPLAY LATEST 15)
-        st.subheader("Raw Data Table (Latest 15)")
-        # df_history is already sorted and limited to 15, we just reverse the display order
-        latest_15_df = df_history.sort_index(ascending=False)
-        st.dataframe(latest_15_df, use_container_width=True, key=f'data_table_{static_key_suffix}')
+        # Update Table (Table shows the latest 15, sorted by latest first)
+        st.subheader("Raw Data Table")
+        # Reverse the index to display the newest entry at the top of the table
+        latest_15_df_display = df_history.sort_index(ascending=False)
+        st.dataframe(latest_15_df_display, use_container_width=True, key=f'data_table_{static_key_suffix}')
 
-# 2. Control Page (REAL-TIME LOOP REMOVED)
+# 2. Control Page
 elif selected == "Control":
     st.title("🕹️ Device Control Interface")
     st.markdown("---")
@@ -174,7 +172,6 @@ elif selected == "Control":
     control_ref = root_ref.child('controls')
 
 
-    # Read the current status for display
     @st.cache_data(ttl=60)
     def read_current_status():
         """Reads the current status from Firebase."""
@@ -188,7 +185,6 @@ elif selected == "Control":
     def set_override(device, value):
         """Pushes the boolean override command to Firebase."""
         try:
-            # We don't use st.cache_data for writes
             control_ref.child(f'{device}_override').set(value)
             st.toast(f"{device.capitalize()} override set to {value}", icon='✅')
         except Exception as e:
